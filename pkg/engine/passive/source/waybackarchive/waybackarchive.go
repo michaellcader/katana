@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/projectdiscovery/katana/pkg/engine/passive/httpclient"
 	"github.com/projectdiscovery/katana/pkg/engine/passive/regexp"
 	"github.com/projectdiscovery/katana/pkg/engine/passive/source"
+	"golang.org/x/net/proxy"
 )
 
 type Source struct {
@@ -21,7 +23,19 @@ func (s *Source) Run(ctx context.Context, sharedCtx *common.Shared, rootUrl stri
 	go func() {
 		defer close(results)
 
+		// 创建 SOCKS5 代理拨号器
+		dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:10809", nil, proxy.Direct)
+		if err != nil {
+			results <- source.Result{Source: s.Name(), Error: err}
+			return
+		}
+
+		// 创建 HTTP 客户端并使用 SOCKS5 代理拨号器
 		httpClient := httpclient.NewHttpClient(sharedCtx.Options.Options.Timeout)
+		httpClient.Client.Transport = &http.Transport{
+			Dial: dialer.Dial,
+		}
+
 		searchURL := fmt.Sprintf("http://web.archive.org/cdx/search/cdx?url=*.%s/*&output=txt&fl=original&collapse=urlkey", rootUrl)
 		resp, err := httpClient.Get(ctx, searchURL, "", nil)
 		if err != nil {
@@ -45,7 +59,6 @@ func (s *Source) Run(ctx context.Context, sharedCtx *common.Shared, rootUrl stri
 
 				results <- source.Result{Source: s.Name(), Value: extractedURL, Reference: searchURL}
 			}
-
 		}
 	}()
 
